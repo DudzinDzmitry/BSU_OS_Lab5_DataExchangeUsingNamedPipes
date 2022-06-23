@@ -4,6 +4,10 @@
 #include <sstream>
 #include "Employee.h"
 
+HANDLE *isBeingModified;
+HANDLE *isBeingRead;
+
+
 HANDLE startProcess(const char *appName, const char *cmdLine) {
     STARTUPINFO si;
     ZeroMemory(&si, sizeof(STARTUPINFO));
@@ -28,31 +32,66 @@ DWORD WINAPI session(LPVOID lpParam) {
 
     HANDLE orderPipe;
     std::string orderPipeName = "\\\\.\\pipe\\orderPipe" + tempStrStream.str();
-    orderPipe = CreateNamedPipe(orderPipeName.c_str(), PIPE_ACCESS_OUTBOUND, PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 0, 0, INFINITE,
+    orderPipe = CreateNamedPipe(orderPipeName.c_str(), PIPE_ACCESS_OUTBOUND, PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 0, 0,
+                                INFINITE,
                                 NULL);
 
     HANDLE requestPipe;
     std::string requestPipeName = "\\\\.\\pipe\\requestPipe" + tempStrStream.str();
-    requestPipe = CreateNamedPipe(requestPipeName.c_str(), PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 0, 0, INFINITE,
+    requestPipe = CreateNamedPipe(requestPipeName.c_str(), PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 0, 0,
+                                  INFINITE,
                                   NULL);
 
     std::string cmdLine = orderPipeName + " " + requestPipeName;
     startProcess("client.exe", cmdLine.c_str());
 
+    ConnectNamedPipe(orderPipe, NULL);
+    ConnectNamedPipe(requestPipe, NULL);
+
     bool terminate = false;
     while (!terminate) {
         DWORD bytesRead;
-        DWORD bytesWrite;
 
         request clientRequest = {};
         ReadFile(requestPipe, &clientRequest, sizeof(request), &bytesRead, NULL);
 
+        DWORD bytesWrite;
         if (clientRequest.requestID == request::READ) {
-            order serverOrder = {clientRequest.ID, order::ACCESS_ALLOWED, };
+            order serverOrder = {};
+            employee temp = {};
+            if (WaitForSingleObject(isBeingModified[clientRequest.ID], 0) == WAIT_OBJECT_0) {
+                serverOrder.orderID = order::ACCESS_DENIED;
+                serverOrder.record = temp;
+            } else {
+                serverOrder.orderID = order::ACCESS_GRANTED;
+                //find the record
+                serverOrder.record = temp;
+                SetEvent(isBeingRead[clientRequest.ID]);
+
+            }
             WriteFile(orderPipe, &serverOrder, sizeof(order), &bytesWrite, NULL);
         } else if (clientRequest.requestID == request::OVERWRITE) {
-            order serverOrder = {clientRequest.ID, order::ACCESS_ALLOWED, };
-            WriteFile(orderPipe, &serverOrder, sizeof(serverOrder), &bytesWrite, NULL);
+            order serverOrder = {};
+            employee temp = {};
+            if (WaitForSingleObject(isBeingModified[clientRequest.ID], 0) == WAIT_OBJECT_0 ||
+                WaitForSingleObject(isBeingRead[clientRequest.ID], 0) == WAIT_OBJECT_0) {
+                serverOrder.orderID = order::ACCESS_DENIED;
+                serverOrder.record = temp;
+
+                WriteFile(orderPipe, &serverOrder, sizeof(serverOrder), &bytesWrite, NULL);
+            } else {
+                serverOrder.orderID = order::ACCESS_GRANTED;
+                //find the record
+                serverOrder.record = temp;
+                SetEvent(isBeingModified[clientRequest.ID]);
+
+                WriteFile(orderPipe, &serverOrder, sizeof(serverOrder), &bytesWrite, NULL);
+
+                ReadFile(requestPipe, &clientRequest, sizeof(request), &bytesRead, NULL);
+
+                //modify the record
+            }
+
         } else terminate = true;
     }
     return 0;
@@ -80,12 +119,18 @@ int main() {
 
     std::ofstream list(listName.c_str(), std::ios::binary);
 
+    *isBeingModified = new HANDLE[recordCount];
+    *isBeingRead = new HANDLE[recordCount];
+
     int i = 0;
     while (i < recordCount) {
         employee temp = {};
         std::cout << "Введите запись (в виде номер сотрудника, имя сотрудника, отработанные часы):\n";
         std::cin >> temp.ID >> temp.fullName >> temp.hoursWorked;
         list.write((char *) &temp, sizeof(employee));
+
+        isBeingModified[i] = CreateEvent(NULL, TRUE, FALSE, NULL);
+        isBeingRead[i] = CreateEvent(NULL, TRUE, FALSE, NULL);
         ++i;
     }
 
@@ -96,17 +141,20 @@ int main() {
     std::cin >> processCount;
 
     HANDLE *sessionThreads = new HANDLE[processCount];
-    DWORD *ID = new DWORD[processCount];
 
     i = 0;
     while (i < processCount) {
-        sessionThreads[i] = CreateThread(NULL, 0, session, (LPVOID) i, 0, &ID[i]);
+        sessionThreads[i] = CreateThread(NULL, 0, session, (LPVOID) i, 0, NULL);
         ++i;
     }
 
     WaitForMultipleObjects(processCount, sessionThreads, TRUE, INFINITE);
 
     printList(listName);
+
+    delete[] sessionThreads;
+    delete[] isBeingModified;
+    delete[] isBeingRead;
 
     system("pause");
     return 0;

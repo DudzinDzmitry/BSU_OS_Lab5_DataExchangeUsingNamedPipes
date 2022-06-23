@@ -8,14 +8,16 @@ struct employee {
 struct request {
     int ID;
     enum requestID {
-        READ, OVERWRITE, TERMINATE
+        OVERWRITE, READ, TERMINATE
     } requestID;
+    employee record;
 };
+
 struct order {
-    int ID;
     enum orderID {
-        ACCESS_BLOCKED, ACCESS_ALLOWED
+        ACCESS_DENIED, ACCESS_GRANTED
     } orderID;
     employee record;
 };
+
 #endif
