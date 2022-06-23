@@ -4,9 +4,41 @@
 #include <sstream>
 #include "Employee.h"
 
+char *listName;
+
 HANDLE *isBeingModified;
 HANDLE *isBeingRead;
 
+employee *findRecord(int recordID) {
+    std::ifstream in(listName, std::ios::binary);
+    while (in.peek() != EOF) {
+        employee *record = new employee;
+        in.read((char *) record, sizeof(employee));
+        if (record->ID == recordID) {
+            in.close();
+            return record;
+        }
+    }
+
+    in.close();
+
+    return NULL;
+}
+
+void overwrite(employee record) {
+    std::fstream f(listName, std::ios::binary | std::ios::in | std::ios::out);
+    int pos = 0;
+    while (f.peek() != EOF) {
+        employee temp = {};
+        f.read((char *) &temp, sizeof(employee));
+        if (record.ID == temp.ID) {
+            f.seekp(pos * sizeof(employee), std::ios::beg);
+            f.write((char *) &record, sizeof(employee));
+            f.close();
+            return;
+        } else pos++;
+    }
+}
 
 HANDLE startProcess(const char *appName, const char *cmdLine) {
     STARTUPINFO si;
@@ -64,10 +96,9 @@ DWORD WINAPI session(LPVOID lpParam) {
                 serverOrder.record = temp;
             } else {
                 serverOrder.orderID = order::ACCESS_GRANTED;
-                //find the record
+                temp = *findRecord(clientRequest.ID);
                 serverOrder.record = temp;
                 SetEvent(isBeingRead[clientRequest.ID]);
-
             }
             WriteFile(orderPipe, &serverOrder, sizeof(order), &bytesWrite, NULL);
         } else if (clientRequest.requestID == request::OVERWRITE) {
@@ -81,24 +112,24 @@ DWORD WINAPI session(LPVOID lpParam) {
                 WriteFile(orderPipe, &serverOrder, sizeof(serverOrder), &bytesWrite, NULL);
             } else {
                 serverOrder.orderID = order::ACCESS_GRANTED;
-                //find the record
-                serverOrder.record = temp;
                 SetEvent(isBeingModified[clientRequest.ID]);
 
                 WriteFile(orderPipe, &serverOrder, sizeof(serverOrder), &bytesWrite, NULL);
 
                 ReadFile(requestPipe, &clientRequest, sizeof(request), &bytesRead, NULL);
 
-                //modify the record
+                overwrite(clientRequest.record);
             }
-
+        } else if (clientRequest.requestID == request::OVERWRITE) {
+            ResetEvent(isBeingModified[clientRequest.ID]);
+            ResetEvent(isBeingRead[clientRequest.ID]);
         } else terminate = true;
     }
     return 0;
 }
 
-void printList(const std::string &listName) {
-    std::ifstream list(listName.c_str(), std::ios::binary);
+void printList() {
+    std::ifstream list(listName, std::ios::binary);
     employee temp = {};
     while (list.read((char *) &temp, sizeof(employee))) {
         std::cout << temp.ID << " " << temp.fullName << " " << temp.hoursWorked << ";\n";
@@ -110,14 +141,13 @@ int main() {
     std::cout << "Данная программа позволяет запись и чтение сообщений в/из бинарного файла различными потоками.\n";
 
     std::cout << "Введите имя бинарного файла для списка сотрудников (в виде \"имя_файла.bin\"):";
-    std::string listName;
     std::cin >> listName;
 
     std::cout << "Введите количество записей в списке соответствующее количеству сотрудников:";
     int recordCount;
     std::cin >> recordCount;
 
-    std::ofstream list(listName.c_str(), std::ios::binary);
+    std::ofstream list(listName, std::ios::binary);
 
     *isBeingModified = new HANDLE[recordCount];
     *isBeingRead = new HANDLE[recordCount];
@@ -134,7 +164,7 @@ int main() {
         ++i;
     }
 
-    printList(listName);
+    printList();
 
     std::cout << "Введите количество экземпляров процесса Client, которые будут запущены:";
     int processCount;
@@ -150,8 +180,9 @@ int main() {
 
     WaitForMultipleObjects(processCount, sessionThreads, TRUE, INFINITE);
 
-    printList(listName);
+    printList();
 
+    list.close();
     delete[] sessionThreads;
     delete[] isBeingModified;
     delete[] isBeingRead;

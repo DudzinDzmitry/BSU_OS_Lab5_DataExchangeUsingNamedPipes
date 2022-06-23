@@ -39,12 +39,15 @@ int main(int argc, char *argv[]) {
                 tempRequest.record = temp;
 
                 WriteFile(requestPipe, &tempRequest, sizeof(request), &bytesWrite, NULL);
-
+                std::cout << "Введите любой символ для окончания доступа к записи:";
+                char closeAccess;
+                std::cin >> closeAccess;
+                tempRequest.requestID = request::CLOSE_ACCESS;
+                WriteFile(requestPipe, &tempRequest, sizeof(request), &bytesWrite, NULL);
             } else if (tempOrder.orderID == order::ACCESS_DENIED) {
                 std::cout << "Доступ к модификации записи №" << ID
                           << " заблокирован, так как она используется другим клиентом\n";
             }
-
         } else if (action == 1) {
             std::cout << "Введите ID сотрудника, чья запись будет прочитана:";
             int ID;
@@ -63,6 +66,11 @@ int main(int argc, char *argv[]) {
                 std::cout << tempOrder.record.ID << " " << tempOrder.record.fullName << " "
                           << tempOrder.record.hoursWorked
                           << ";\n";
+                std::cout << "Введите любой символ для окончания доступа к записи:";
+                char closeAccess;
+                std::cin >> closeAccess;
+                tempRequest.requestID = request::CLOSE_ACCESS;
+                WriteFile(requestPipe, &tempRequest, sizeof(request), &bytesWrite, NULL);
             } else if (tempOrder.orderID == order::ACCESS_DENIED) {
                 std::cout << "Доступ к чтению записи №" << ID
                           << " заблокирован, так как она используется другим клиентом\n";
@@ -75,8 +83,7 @@ int main(int argc, char *argv[]) {
             DWORD bytesWrite;
             WriteFile(requestPipe, &tempRequest, sizeof(request), &bytesWrite, NULL);
             terminate = true;
-        }
-        else std::cout << "Введен неверный код действия.\n";
+        } else std::cout << "Введен неверный код действия.\n";
     }
 
     CloseHandle(orderPipe);

@@ -8,7 +8,7 @@ struct employee {
 struct request {
     int ID;
     enum requestID {
-        OVERWRITE, READ, TERMINATE
+        OVERWRITE, READ, CLOSE_ACCESS, TERMINATE
     } requestID;
     employee record;
 };
