@@ -1,10 +1,10 @@
 #include <iostream>
-#include <windows.h>
 #include <fstream>
-#include <string>
+#include <Windows.h>
+#include <sstream>
 #include "Employee.h"
 
-bool startProcess(const char *appName, const char *cmdLine) {
+HANDLE startProcess(const char *appName, const char *cmdLine) {
     STARTUPINFO si;
     ZeroMemory(&si, sizeof(STARTUPINFO));
     si.cb = sizeof(STARTUPINFO);
@@ -13,13 +13,49 @@ bool startProcess(const char *appName, const char *cmdLine) {
 
     if (!CreateProcess(appName, const_cast<char *>(cmdLine), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si,
                        &pi))
-        return false;
+        return NULL;
 
     WaitForSingleObject(pi.hProcess, INFINITE);
 
-    CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
-    return true;
+    return pi.hThread;
+}
+
+DWORD WINAPI session(LPVOID lpParam) {
+    int pipeIndex = (long long) lpParam;
+    std::ostringstream tempStrStream;
+    tempStrStream << pipeIndex;
+
+    HANDLE orderPipe;
+    std::string orderPipeName = "\\\\.\\pipe\\orderPipe" + tempStrStream.str();
+    orderPipe = CreateNamedPipe(orderPipeName.c_str(), PIPE_ACCESS_OUTBOUND, PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 0, 0, INFINITE,
+                                NULL);
+
+    HANDLE requestPipe;
+    std::string requestPipeName = "\\\\.\\pipe\\requestPipe" + tempStrStream.str();
+    requestPipe = CreateNamedPipe(requestPipeName.c_str(), PIPE_ACCESS_INBOUND, PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 0, 0, INFINITE,
+                                  NULL);
+
+    std::string cmdLine = orderPipeName + " " + requestPipeName;
+    startProcess("client.exe", cmdLine.c_str());
+
+    bool terminate = false;
+    while (!terminate) {
+        DWORD bytesRead;
+        DWORD bytesWrite;
+
+        request clientRequest = {};
+        ReadFile(requestPipe, &clientRequest, sizeof(request), &bytesRead, NULL);
+
+        if (clientRequest.requestID == request::READ) {
+            order serverOrder = {clientRequest.ID, order::ACCESS_ALLOWED, };
+            WriteFile(orderPipe, &serverOrder, sizeof(order), &bytesWrite, NULL);
+        } else if (clientRequest.requestID == request::OVERWRITE) {
+            order serverOrder = {clientRequest.ID, order::ACCESS_ALLOWED, };
+            WriteFile(orderPipe, &serverOrder, sizeof(serverOrder), &bytesWrite, NULL);
+        } else terminate = true;
+    }
+    return 0;
 }
 
 void printList(const std::string &listName) {
@@ -59,15 +95,19 @@ int main() {
     int processCount;
     std::cin >> processCount;
 
+    HANDLE *sessionThreads = new HANDLE[processCount];
+    DWORD *ID = new DWORD[processCount];
+
     i = 0;
     while (i < processCount) {
-        HANDLE hNamedPipe = CreateNamedPipe("\\\\.\\pipe\\named_pipe", PIPE_ACCESS_DUPLEX,
-                                            PIPE_TYPE_MESSAGE | PIPE_WAIT, processCount,
-                                            0, 0, INFINITE, NULL);
-        startProcess("client.exe", "");
-        ConnectNamedPipe(hNamedPipe, NULL);
+        sessionThreads[i] = CreateThread(NULL, 0, session, (LPVOID) i, 0, &ID[i]);
         ++i;
     }
 
+    WaitForMultipleObjects(processCount, sessionThreads, TRUE, INFINITE);
+
+    printList(listName);
+
     system("pause");
+    return 0;
 }
