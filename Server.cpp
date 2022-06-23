@@ -9,6 +9,8 @@ char *listName;
 HANDLE *isBeingModified;
 HANDLE *isBeingRead;
 
+CRITICAL_SECTION cs;
+
 employee *findRecord(int recordID) {
     std::ifstream in(listName, std::ios::binary);
     while (in.peek() != EOF) {
@@ -91,6 +93,7 @@ DWORD WINAPI session(LPVOID lpParam) {
         if (clientRequest.requestID == request::READ) {
             order serverOrder = {};
             employee temp = {};
+            EnterCriticalSection(&cs);
             if (WaitForSingleObject(isBeingModified[clientRequest.ID], 0) == WAIT_OBJECT_0) {
                 serverOrder.orderID = order::ACCESS_DENIED;
                 serverOrder.record = temp;
@@ -100,10 +103,12 @@ DWORD WINAPI session(LPVOID lpParam) {
                 serverOrder.record = temp;
                 SetEvent(isBeingRead[clientRequest.ID]);
             }
+            LeaveCriticalSection(&cs);
             WriteFile(orderPipe, &serverOrder, sizeof(order), &bytesWrite, NULL);
         } else if (clientRequest.requestID == request::OVERWRITE) {
             order serverOrder = {};
             employee temp = {};
+            EnterCriticalSection(&cs);
             if (WaitForSingleObject(isBeingModified[clientRequest.ID], 0) == WAIT_OBJECT_0 ||
                 WaitForSingleObject(isBeingRead[clientRequest.ID], 0) == WAIT_OBJECT_0) {
                 serverOrder.orderID = order::ACCESS_DENIED;
@@ -120,9 +125,12 @@ DWORD WINAPI session(LPVOID lpParam) {
 
                 overwrite(clientRequest.record);
             }
+            LeaveCriticalSection(&cs);
         } else if (clientRequest.requestID == request::OVERWRITE) {
+            EnterCriticalSection(&cs);
             ResetEvent(isBeingModified[clientRequest.ID]);
             ResetEvent(isBeingRead[clientRequest.ID]);
+            LeaveCriticalSection(&cs);
         } else terminate = true;
     }
     return 0;
@@ -172,6 +180,8 @@ int main() {
 
     HANDLE *sessionThreads = new HANDLE[processCount];
 
+    InitializeCriticalSection(&cs);
+
     i = 0;
     while (i < processCount) {
         sessionThreads[i] = CreateThread(NULL, 0, session, (LPVOID) i, 0, NULL);
@@ -182,6 +192,7 @@ int main() {
 
     printList();
 
+    DeleteCriticalSection(&cs);
     list.close();
     delete[] sessionThreads;
     delete[] isBeingModified;
